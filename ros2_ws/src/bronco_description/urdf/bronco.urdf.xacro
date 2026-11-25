@@ -1,0 +1,219 @@
+<?xml version="1.0"?>
+<!--
+  Bronco robot description (URDF, written with xacro macros).
+
+  URDF describes a robot as a TREE of LINKS (rigid bodies) connected by JOINTS.
+  Each link can have:
+    visual    - what it looks like (RViz, Gazebo)
+    collision - the shape physics uses for contact (often simpler than visual)
+    inertial  - mass and inertia tensor (Gazebo needs these to simulate it)
+
+  Xacro = "XML macros". It lets us use variables (${wheel_radius}), math, and
+  reusable macros, then `xacro bronco.urdf.xacro` expands it into plain URDF.
+
+  Frame convention (ROS REP-103): x forward, y left, z up. Units: meters, kg, rad.
+
+  The tree:
+    base_link                       (center of the REAR axle, at axle height)
+    ├── chassis_link                (fixed)  the body box
+    ├── rear_left_wheel             (continuous joint, driven)
+    ├── rear_right_wheel            (continuous joint, driven)
+    ├── front_left_steering_link    (revolute joint about z = steering)
+    │   └── front_left_wheel        (continuous joint, free-spinning)
+    ├── front_right_steering_link
+    │   └── front_right_wheel
+    ├── lidar_link                  (fixed)
+    ├── camera_link                 (fixed)
+    │   └── camera_optical_link     (fixed, rotated to camera convention)
+    └── imu_link                    (fixed)
+
+  Why base_link at the rear axle? For a car-like (Ackermann) robot, the rear
+  axle center is the point that moves along the path without sliding sideways,
+  which makes the steering math and path following simpler.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="bronco">
+
+  <!-- ====================== Dimensions (1/10-scale RC car) ======================
+       Measure your real car and update these. Everything below is built from them. -->
+  <xacro:property name="wheel_radius"   value="0.055"/>  <!-- 110 mm tires -->
+  <xacro:property name="wheel_width"    value="0.045"/>
+  <xacro:property name="wheel_mass"     value="0.10"/>
+  <xacro:property name="wheelbase"      value="0.33"/>   <!-- front axle to rear axle -->
+  <xacro:property name="track"          value="0.25"/>   <!-- left wheel center to right wheel center -->
+  <xacro:property name="steering_limit" value="0.5"/>    <!-- max steering angle, rad (~29 deg) -->
+
+  <xacro:property name="chassis_length" value="0.42"/>
+  <xacro:property name="chassis_width"  value="0.18"/>
+  <xacro:property name="chassis_height" value="0.06"/>
+  <xacro:property name="chassis_mass"   value="2.5"/>
+  <!-- Height of the chassis center above the axles (gives ground clearance) -->
+  <xacro:property name="chassis_z"      value="0.03"/>
+
+  <!-- Gazebo-only parts (physics friction, plugins, sensors) live in this file -->
+  <xacro:include filename="$(find bronco_description)/urdf/bronco.gazebo.xacro"/>
+
+  <!-- ====================== Inertia helper macros ======================
+       Physics needs each link's inertia tensor. These are the textbook formulas
+       for a solid box and a solid cylinder. Wrong inertias = jittery, flipping,
+       or "exploding" simulations, so it's worth getting them roughly right. -->
+  <xacro:macro name="box_inertial" params="m x y z">
+    <inertial>
+      <mass value="${m}"/>
+      <inertia ixx="${m*(y*y+z*z)/12}" ixy="0" ixz="0"
+               iyy="${m*(x*x+z*z)/12}" iyz="0"
+               izz="${m*(x*x+y*y)/12}"/>
+    </inertial>
+  </xacro:macro>
+
+  <!-- Cylinder whose axis points along y (like an axle) -->
+  <xacro:macro name="wheel_inertial" params="m r h">
+    <inertial>
+      <mass value="${m}"/>
+      <inertia ixx="${m*(3*r*r+h*h)/12}" ixy="0" ixz="0"
+               iyy="${m*r*r/2}"           iyz="0"
+               izz="${m*(3*r*r+h*h)/12}"/>
+    </inertial>
+  </xacro:macro>
+
+  <!-- ====================== Materials (colors for RViz) ====================== -->
+  <material name="blue">  <color rgba="0.1 0.3 0.8 1"/></material>
+  <material name="black"> <color rgba="0.1 0.1 0.1 1"/></material>
+  <material name="gray">  <color rgba="0.5 0.5 0.5 1"/></material>
+  <material name="red">   <color rgba="0.8 0.1 0.1 1"/></material>
+
+  <!-- ====================== Base and chassis ====================== -->
+  <!-- base_link has no geometry: it's just the reference frame of the robot. -->
+  <link name="base_link"/>
+
+  <link name="chassis_link">
+    <visual>
+      <geometry><box size="${chassis_length} ${chassis_width} ${chassis_height}"/></geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <geometry><box size="${chassis_length} ${chassis_width} ${chassis_height}"/></geometry>
+    </collision>
+    <xacro:box_inertial m="${chassis_mass}" x="${chassis_length}" y="${chassis_width}" z="${chassis_height}"/>
+  </link>
+
+  <!-- The chassis is centered halfway between the axles -->
+  <joint name="chassis_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="chassis_link"/>
+    <origin xyz="${wheelbase/2} 0 ${chassis_z}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ====================== Wheels ====================== -->
+  <!-- One macro, used four times. A URDF cylinder's axis is along z, so we roll
+       it 90 deg (pi/2 about x) to make it lie along y like an axle. -->
+  <xacro:macro name="wheel_link" params="name">
+    <link name="${name}">
+      <visual>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+        <material name="black"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+      </collision>
+      <xacro:wheel_inertial m="${wheel_mass}" r="${wheel_radius}" h="${wheel_width}"/>
+    </link>
+  </xacro:macro>
+
+  <!-- Rear wheels: "continuous" = a revolute joint with no angle limits.
+       They spin about y. The Ackermann plugin drives these. -->
+  <xacro:macro name="rear_wheel" params="side y_sign">
+    <xacro:wheel_link name="rear_${side}_wheel"/>
+    <joint name="rear_${side}_wheel_joint" type="continuous">
+      <parent link="base_link"/>
+      <child link="rear_${side}_wheel"/>
+      <origin xyz="0 ${y_sign*track/2} 0" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- Front wheels have TWO joints, like a real car's front end:
+       1) a steering "knuckle" that rotates about z (revolute, limited angle)
+       2) the wheel itself, spinning about y on the knuckle (continuous)       -->
+  <xacro:macro name="front_wheel" params="side y_sign">
+    <link name="front_${side}_steering_link">
+      <!-- Tiny mass: Gazebo ignores links without inertia -->
+      <xacro:box_inertial m="0.02" x="0.02" y="0.02" z="0.02"/>
+    </link>
+    <joint name="front_${side}_steering_joint" type="revolute">
+      <parent link="base_link"/>
+      <child link="front_${side}_steering_link"/>
+      <origin xyz="${wheelbase} ${y_sign*track/2} 0" rpy="0 0 0"/>
+      <axis xyz="0 0 1"/>
+      <limit lower="${-steering_limit}" upper="${steering_limit}" effort="10" velocity="3"/>
+    </joint>
+
+    <xacro:wheel_link name="front_${side}_wheel"/>
+    <joint name="front_${side}_wheel_joint" type="continuous">
+      <parent link="front_${side}_steering_link"/>
+      <child link="front_${side}_wheel"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:rear_wheel  side="left"  y_sign="1"/>
+  <xacro:rear_wheel  side="right" y_sign="-1"/>
+  <xacro:front_wheel side="left"  y_sign="1"/>
+  <xacro:front_wheel side="right" y_sign="-1"/>
+
+  <!-- ====================== Sensors (mounting positions) ======================
+       These links only define WHERE each sensor is. What the sensor does in
+       simulation is defined in bronco.gazebo.xacro. On the real robot, the
+       drivers publish data stamped with these same frame names. -->
+
+  <!-- 2D LiDAR on a small post on top, near the front -->
+  <link name="lidar_link">
+    <visual>
+      <geometry><cylinder radius="0.035" length="0.04"/></geometry>
+      <material name="red"/>
+    </visual>
+    <collision>
+      <geometry><cylinder radius="0.035" length="0.04"/></geometry>
+    </collision>
+    <xacro:box_inertial m="0.15" x="0.07" y="0.07" z="0.04"/>
+  </link>
+  <joint name="lidar_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="lidar_link"/>
+    <origin xyz="${wheelbase*0.75} 0 ${chassis_z + chassis_height/2 + 0.04}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Forward-facing camera on the front bumper -->
+  <link name="camera_link">
+    <visual>
+      <geometry><box size="0.02 0.06 0.03"/></geometry>
+      <material name="gray"/>
+    </visual>
+    <xacro:box_inertial m="0.05" x="0.02" y="0.06" z="0.03"/>
+  </link>
+  <joint name="camera_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="camera_link"/>
+    <origin xyz="${wheelbase/2 + chassis_length/2 + 0.01} 0 ${chassis_z + 0.02}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Image data uses a different axis convention: z out of the lens, x right,
+       y down. This extra frame rotates camera_link into that "optical" frame. -->
+  <link name="camera_optical_link"/>
+  <joint name="camera_optical_joint" type="fixed">
+    <parent link="camera_link"/>
+    <child link="camera_optical_link"/>
+    <origin xyz="0 0 0" rpy="${-pi/2} 0 ${-pi/2}"/>
+  </joint>
+
+  <!-- IMU at the middle of the chassis -->
+  <link name="imu_link"/>
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <origin xyz="${wheelbase/2} 0 ${chassis_z}" rpy="0 0 0"/>
+  </joint>
+
+</robot>

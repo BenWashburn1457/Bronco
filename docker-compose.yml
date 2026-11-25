@@ -29,7 +29,7 @@ services:
 
     environment:
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-42}
-      - DISPLAY=${DISPLAY}            # where GUI windows (RViz) should appear
+      - DISPLAY=${DISPLAY:-}            # where GUI windows (RViz) should appear
     volumes:
       # Your code lives on the host and is mounted in: edit in VS Code on the
       # host, build in the container. Deleting the container doesn't lose code.
@@ -37,7 +37,12 @@ services:
       # X11 socket so RViz/rqt windows can open on your screen.
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
     devices:
-      - /dev/dri:/dev/dri             # Intel GPU, for faster 3D in RViz
+      - /dev/dri:/dev/dri             # Intel GPU, for 3D rendering (RViz, Gazebo)
+    # The GPU device is owned by the host's "render" group, whose number differs
+    # between machines. Put RENDER_GID in .env (see README) so the container user
+    # can use the GPU; without it, Gazebo falls back to slow CPU rendering.
+    group_add:
+      - "${RENDER_GID:-video}"
     stdin_open: true
     tty: true
 

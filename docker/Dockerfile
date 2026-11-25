@@ -58,14 +58,20 @@ RUN if id -u ubuntu >/dev/null 2>&1; then userdel -r ubuntu; fi \
 # so editing code won't re-run this slow apt step; only changing dependencies
 # in a package.xml will. `--parents` keeps the folder structure.
 COPY --parents ros2_ws/src/*/package.xml /tmp/deps/
-RUN apt-get update \
+# bronco_gazebo is simulation-only (it pulls in Gazebo, ~1 GB). The robot never
+# runs the simulator, so we skip its dependencies here and install them only in
+# the dev stage below.
+RUN rm -rf /tmp/deps/ros2_ws/src/bronco_gazebo \
+    && apt-get update \
     && rosdep update --rosdistro ${ROS_DISTRO} \
     && rosdep install --from-paths /tmp/deps/ros2_ws/src --ignore-src -y \
     && rm -rf /var/lib/apt/lists/* /tmp/deps
 
 # Entrypoint script: sources ROS before running whatever command you give.
-COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# --chmod=755 = owner can read/write/execute, everyone else can read/execute.
+# (Just `chmod +x` isn't enough: if the file was 600 on the host, the container
+# user can execute it but not READ it, and bash needs to read a script to run it.)
+COPY --chmod=755 docker/entrypoint.sh /entrypoint.sh
 
 # Make interactive shells (docker exec ... bash) source ROS automatically too.
 RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /home/${USERNAME}/.bashrc \
@@ -88,7 +94,16 @@ ARG USERNAME=ben
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-${ROS_DISTRO}-desktop \
+        ros-${ROS_DISTRO}-teleop-twist-keyboard \
         gdb \
         clang-format \
     && rm -rf /var/lib/apt/lists/*
+
+# Simulation dependencies (Gazebo Harmonic + the ROS <-> Gazebo bridge), read
+# from bronco_gazebo's package.xml, same trick as in the base stage.
+COPY ros2_ws/src/bronco_gazebo/package.xml /tmp/deps/bronco_gazebo/package.xml
+RUN apt-get update \
+    && rosdep install --from-paths /tmp/deps --ignore-src -y \
+        --skip-keys "bronco_description" \
+    && rm -rf /var/lib/apt/lists/* /tmp/deps
 USER ${USERNAME}
