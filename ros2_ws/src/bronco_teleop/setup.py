@@ -21,6 +21,7 @@ setup(
         # "ros2 run bronco_teleop wasd_teleop" runs main() in wasd_teleop.py
         'console_scripts': [
             'wasd_teleop = bronco_teleop.wasd_teleop:main',
+            'drive_window = bronco_teleop.drive_window:main',
         ],
     },
 )

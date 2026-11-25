@@ -9,6 +9,8 @@
 
   <exec_depend>rclpy</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
+  <!-- Qt for the drive window (ROS's wrapper around PyQt) -->
+  <exec_depend>python_qt_binding</exec_depend>
 
   <export>
     <!-- ament_python = a pure-Python package (built with setup.py, not CMake) -->
