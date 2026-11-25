@@ -30,6 +30,7 @@ services:
     environment:
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-42}
       - DISPLAY=${DISPLAY:-}            # where GUI windows (RViz) should appear
+      - GZ_IP=127.0.0.1                 # keep Gazebo's internal messaging on localhost
     volumes:
       # Your code lives on the host and is mounted in: edit in VS Code on the
       # host, build in the container. Deleting the container doesn't lose code.
