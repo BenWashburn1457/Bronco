@@ -1,0 +1,69 @@
+# Docker Compose = a file that remembers all the long `docker run` options.
+#
+#   Laptop:        docker compose up -d dev     then  docker compose exec dev bash
+#   Raspberry Pi:  docker compose up -d robot   then  docker compose exec robot bash
+#
+# Values like ${ROS_DOMAIN_ID} come from the .env file next to this one.
+
+services:
+
+  # ---------------------------------------------------------------- laptop
+  dev:
+    build:
+      context: .                     # repo root, so the Dockerfile can see ros2_ws/
+      dockerfile: docker/Dockerfile
+      target: dev                    # build the stage with GUI tools
+      args:
+        USER_UID: ${USER_UID:-1000}
+        USER_GID: ${USER_GID:-1000}
+    image: bronco:dev
+    container_name: bronco-dev
+
+    # Use the host's network directly. ROS 2 finds other nodes (e.g. on the Pi)
+    # with multicast discovery, which doesn't work well through Docker's
+    # default virtual network.
+    network_mode: host
+    # Share memory with the host so ROS can pass big messages (images, point
+    # clouds) between processes without copying.
+    ipc: host
+
+    environment:
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-42}
+      - DISPLAY=${DISPLAY}            # where GUI windows (RViz) should appear
+    volumes:
+      # Your code lives on the host and is mounted in: edit in VS Code on the
+      # host, build in the container. Deleting the container doesn't lose code.
+      - ./ros2_ws:/home/ben/ros2_ws
+      # X11 socket so RViz/rqt windows can open on your screen.
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    devices:
+      - /dev/dri:/dev/dri             # Intel GPU, for faster 3D in RViz
+    stdin_open: true
+    tty: true
+
+  # ---------------------------------------------------------------- robot (Pi)
+  robot:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: base                    # no GUI tools, keeps the Pi image small
+      args:
+        USER_UID: ${USER_UID:-1000}
+        USER_GID: ${USER_GID:-1000}
+    image: bronco:robot
+    container_name: bronco-robot
+    network_mode: host
+    ipc: host
+    environment:
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-42}
+    volumes:
+      - ./ros2_ws:/home/ben/ros2_ws
+      # Expose all hardware (ESP32 serial, LiDAR, camera, I2C, GPIO).
+      # Mounting /dev also picks up devices plugged in AFTER the container started.
+      - /dev:/dev
+    # Needed so the container can actually open those devices. It's the easy
+    # option for a robot you own; you could list individual devices instead.
+    privileged: true
+    restart: unless-stopped           # come back up after the Pi reboots
+    stdin_open: true
+    tty: true
