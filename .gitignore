@@ -2,3 +2,7 @@
 /ros2_ws/build/
 /ros2_ws/install/
 /ros2_ws/log/
+# MCU host test artifacts
+/mcu_ws/test/test_all
+/mcu_ws/test/.required
+/mcu_ws/test/.covered
